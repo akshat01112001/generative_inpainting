@@ -4,7 +4,7 @@ import math
 import cv2
 import numpy as np
 import tensorflow as tf
-from tensorflow.contrib.framework.python.ops import add_arg_scope
+from tensorflow.keras.utils import get_custom_objects
 from PIL import Image, ImageDraw
 
 from neuralgym.ops.layers import resize
@@ -12,16 +12,30 @@ from neuralgym.ops.layers import *
 from neuralgym.ops.loss_ops import *
 from neuralgym.ops.gan_ops import *
 from neuralgym.ops.summary_ops import *
-
+tf.compat.v1.disable_v2_behavior()
 
 logger = logging.getLogger()
 np.random.seed(2018)
 
 
-@add_arg_scope
+def xavier_init(size):
+  '''Xavier initialization.
+
+  Args:
+    - size: vector size
+
+  Returns:
+    - initialized random vector.
+  '''
+  in_dim = size[0]
+  xavier_stddev = 1. / tf.sqrt(in_dim / 2.)
+  return tf.compat.v1.random_normal(shape=size, stddev=xavier_stddev)
+
+
 def gen_conv(x, cnum, ksize, stride=1, rate=1, name='conv',
              padding='SAME', activation=tf.nn.elu, training=True):
-    """Define conv for generator.
+    """
+    Define conv for generator.
 
     Args:
         x: Input.
@@ -43,20 +57,23 @@ def gen_conv(x, cnum, ksize, stride=1, rate=1, name='conv',
         p = int(rate*(ksize-1)/2)
         x = tf.pad(x, [[0,0], [p, p], [p, p], [0,0]], mode=padding)
         padding = 'VALID'
-    x = tf.layers.conv2d(
-        x, cnum, ksize, stride, dilation_rate=rate,
-        activation=None, padding=padding, name=name)
+    x = tf.nn.conv2d(x, [[[[ksize, ksize, ksize, ksize, ksize, ksize, ksize]]]], strides=[
+                     1, stride, stride, 1], name=name, padding=padding)
+    print(x.shape)
     if cnum == 3 or activation is None:
         # conv for output
         return x
-    x, y = tf.split(x, 2, 3)
-    x = activation(x)
-    y = tf.nn.sigmoid(y)
-    x = x * y
+    # tf.reshape(x,[(x.shape[0]*x.shape[3])//2,(x.shape[1]*x.shape[3])//2,(x.shape[2]*x.shape[3])//2,2])
+    # # tf.reshape(x, [x.shape[0]/2, x.shape[1]/2, x.shape[2]/2,2])
+    # print(x.shape)
+    # x, y = tf.split(x, 2, 3)
+    # x = activation(x)
+    # y = tf.nn.sigmoid(y)
+    # x = x * y
     return x
 
 
-@add_arg_scope
+
 def gen_deconv(x, cnum, name='upsample', padding='SAME', training=True):
     """Define deconv for generator.
     The deconv is defined to be a x2 resize_nearest_neighbor operation with
@@ -72,15 +89,15 @@ def gen_deconv(x, cnum, name='upsample', padding='SAME', training=True):
         tf.Tensor: output
 
     """
-    with tf.variable_scope(name):
-        x = resize(x, func=tf.image.resize_nearest_neighbor)
+    with tf.compat.v1.variable_scope(name):
+        x = resize(x, func=tf.image.resize)
         x = gen_conv(
             x, cnum, 3, 1, name=name+'_conv', padding=padding,
             training=training)
     return x
 
 
-@add_arg_scope
+
 def dis_conv(x, cnum, ksize=5, stride=2, name='conv', training=True):
     """Define conv for discriminator.
     Activation is set to leaky_relu.
@@ -114,9 +131,9 @@ def random_bbox(FLAGS):
     img_width = img_shape[1]
     maxt = img_height - FLAGS.vertical_margin - FLAGS.height
     maxl = img_width - FLAGS.horizontal_margin - FLAGS.width
-    t = tf.random_uniform(
+    t = tf.compat.v1.random_uniform(
         [], minval=FLAGS.vertical_margin, maxval=maxt, dtype=tf.int32)
-    l = tf.random_uniform(
+    l = tf.compat.v1.random_uniform(
         [], minval=FLAGS.horizontal_margin, maxval=maxl, dtype=tf.int32)
     h = tf.constant(FLAGS.height)
     w = tf.constant(FLAGS.width)
@@ -140,15 +157,15 @@ def bbox2mask(FLAGS, bbox, name='mask'):
         mask[:, bbox[0]+h:bbox[0]+bbox[2]-h,
              bbox[1]+w:bbox[1]+bbox[3]-w, :] = 1.
         return mask
-    with tf.variable_scope(name), tf.device('/cpu:0'):
+    with tf.compat.v1.variable_scope(name), tf.device('/cpu:0'):
         img_shape = FLAGS.img_shapes
         height = img_shape[0]
         width = img_shape[1]
-        mask = tf.py_func(
+        mask = tf.py_function(
             npmask,
             [bbox, height, width,
              FLAGS.max_delta_height, FLAGS.max_delta_width],
-            tf.float32, stateful=False)
+            tf.float32)
         mask.set_shape([1] + [height, width] + [1])
     return mask
 
@@ -209,14 +226,14 @@ def brush_stroke_mask(FLAGS, name='mask'):
         mask = np.asarray(mask, np.float32)
         mask = np.reshape(mask, (1, H, W, 1))
         return mask
-    with tf.variable_scope(name), tf.device('/cpu:0'):
+    with tf.compat.v1.variable_scope(name), tf.device('/cpu:0'):
         img_shape = FLAGS.img_shapes
         height = img_shape[0]
         width = img_shape[1]
-        mask = tf.py_func(
+        mask = tf.py_function(
             generate_mask,
             [height, width],
-            tf.float32, stateful=True)
+            tf.float32)
         mask.set_shape([1] + [height, width] + [1])
     return mask
 
@@ -249,7 +266,7 @@ def resize_mask_like(mask, x):
     """
     mask_resize = resize(
         mask, to_shape=x.get_shape().as_list()[1:3],
-        func=tf.image.resize_nearest_neighbor)
+        func=tf.image.resize)
     return mask_resize
 
 
@@ -280,35 +297,35 @@ def contextual_attention(f, b, mask=None, ksize=3, stride=1, rate=1,
     raw_int_bs = b.get_shape().as_list()
     # extract patches from background with stride and rate
     kernel = 2*rate
-    raw_w = tf.extract_image_patches(
+    raw_w = tf.compat.v1.extract_image_patches(
         b, [1,kernel,kernel,1], [1,rate*stride,rate*stride,1], [1,1,1,1], padding='SAME')
     raw_w = tf.reshape(raw_w, [raw_int_bs[0], -1, kernel, kernel, raw_int_bs[3]])
     raw_w = tf.transpose(raw_w, [0, 2, 3, 4, 1])  # transpose to b*k*k*c*hw
     # downscaling foreground option: downscaling both foreground and
     # background for matching and use original background for reconstruction.
-    f = resize(f, scale=1./rate, func=tf.image.resize_nearest_neighbor)
-    b = resize(b, to_shape=[int(raw_int_bs[1]/rate), int(raw_int_bs[2]/rate)], func=tf.image.resize_nearest_neighbor)  # https://github.com/tensorflow/tensorflow/issues/11651
+    f = resize(f, scale=1./rate, func=tf.image.resize)
+    b = resize(b, to_shape=[int(raw_int_bs[1]/rate), int(raw_int_bs[2]/rate)], func=tf.image.resize)  # https://github.com/tensorflow/tensorflow/issues/11651
     if mask is not None:
-        mask = resize(mask, scale=1./rate, func=tf.image.resize_nearest_neighbor)
+        mask = resize(mask, scale=1./rate, func=tf.image.resize)
     fs = tf.shape(f)
     int_fs = f.get_shape().as_list()
     f_groups = tf.split(f, int_fs[0], axis=0)
     # from t(H*W*C) to w(b*k*k*c*h*w)
     bs = tf.shape(b)
     int_bs = b.get_shape().as_list()
-    w = tf.extract_image_patches(
+    w = tf.compat.v1.extract_image_patches(
         b, [1,ksize,ksize,1], [1,stride,stride,1], [1,1,1,1], padding='SAME')
     w = tf.reshape(w, [int_fs[0], -1, ksize, ksize, int_fs[3]])
     w = tf.transpose(w, [0, 2, 3, 4, 1])  # transpose to b*k*k*c*hw
     # process mask
     if mask is None:
         mask = tf.zeros([1, bs[1], bs[2], 1])
-    m = tf.extract_image_patches(
+    m = tf.compat.v1.extract_image_patches(
         mask, [1,ksize,ksize,1], [1,stride,stride,1], [1,1,1,1], padding='SAME')
     m = tf.reshape(m, [1, -1, ksize, ksize, 1])
     m = tf.transpose(m, [0, 2, 3, 4, 1])  # transpose to b*k*k*c*hw
     m = m[0]
-    mm = tf.cast(tf.equal(tf.reduce_mean(m, axis=[0,1,2], keep_dims=True), 0.), tf.float32)
+    mm = tf.cast(tf.equal(tf.reduce_mean(m, axis=[0,1,2]), 0.), tf.float32)
     w_groups = tf.split(w, int_bs[0], axis=0)
     raw_w_groups = tf.split(raw_w, int_bs[0], axis=0)
     y = []
@@ -360,7 +377,7 @@ def contextual_attention(f, b, mask=None, ksize=3, stride=1, rate=1,
     # # case2: visualize which pixels are attended
     # flow = highlight_flow_tf(offsets * tf.cast(mask, tf.int32))
     if rate != 1:
-        flow = resize(flow, scale=rate, func=tf.image.resize_bilinear)
+        flow = resize(flow, scale=rate, func=tf.compat.v1.image.resize_bilinear)
     return y, flow
 
 
@@ -498,8 +515,8 @@ def flow_to_image(flow):
 def flow_to_image_tf(flow, name='flow_to_image'):
     """Tensorflow ops for computing flow to image.
     """
-    with tf.variable_scope(name), tf.device('/cpu:0'):
-        img = tf.py_func(flow_to_image, [flow], tf.float32, stateful=False)
+    with tf.compat.v1.variable_scope(name), tf.device('/cpu:0'):
+        img = tf.py_function(flow_to_image, [flow], tf.float32)
         img.set_shape(flow.get_shape().as_list()[0:-1]+[3])
         img = img / 127.5 - 1.
         return img
@@ -526,8 +543,8 @@ def highlight_flow(flow):
 def highlight_flow_tf(flow, name='flow_to_image'):
     """Tensorflow ops for highlight flow.
     """
-    with tf.variable_scope(name), tf.device('/cpu:0'):
-        img = tf.py_func(highlight_flow, [flow], tf.float32, stateful=False)
+    with tf.compat.v1.variable_scope(name), tf.device('/cpu:0'):
+        img = tf.py_function(highlight_flow, [flow], tf.float32, stateful=False)
         img.set_shape(flow.get_shape().as_list()[0:-1]+[3])
         img = img / 127.5 - 1.
         return img

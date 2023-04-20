@@ -5,7 +5,7 @@ import tensorflow as tf
 import neuralgym as ng
 
 from inpaint_model import InpaintCAModel
-
+tf.compat.v1.disable_v2_behavior()
 
 def multigpu_graph_def(model, FLAGS, data, gpu_id=0, loss_type='g'):
     with tf.device('/cpu:0'):
