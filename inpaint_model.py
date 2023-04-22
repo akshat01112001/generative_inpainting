@@ -74,8 +74,8 @@ class InpaintCAModel(Model):
             #            * x.shape[3])//2, (x.shape[2]*x.shape[3])//2, 2])
             # x = x*mask + xin[:, :, :, 0:5]*(1.-mask)
             # x.set_shape(xin[:, :, :, 0:5].get_shape().as_list())
-            # conv branch
-            # xnow = tf.concat([x, ones_x, ones_x*mask], axis=3)
+            # # conv branch
+            xnow = tf.concat([x, ones_x, ones_x*mask], axis=3)
             xnow = x
             x = gen_conv(xnow, int(cnum), 5, 1, name='xconv1')
             x = gen_conv(x, int(cnum), 3, 2, name='xconv2_downsample')
@@ -139,6 +139,14 @@ class InpaintCAModel(Model):
             batch_data, edge = batch_data
             edge = edge[:, :, :, 0:1] / 255.
             edge = tf.cast(edge > FLAGS.edge_threshold, tf.float32)
+        
+        # shape = tf.shape(batch_data)
+        # last_dim = shape[-1]
+        
+        # new_last_dim = 6
+        # new_shape = tf.concat([shape[:-1], [new_last_dim]], axis=0)
+        # batch_data = tf.ones(new_shape)
+        
         batch_pos = batch_data / 127.5 - 1.
         # generate mask, 1 represents masked point
         bbox = random_bbox(FLAGS)
@@ -151,6 +159,9 @@ class InpaintCAModel(Model):
             ),
             tf.float32
         )
+        # new_width = (mask.shape[2] * 6) // 4
+        # mask= tf.reshape(
+        #     mask, [mask.shape[0], mask.shape[1], new_width, -1])
 
         batch_incomplete = batch_pos*(1.-mask)
         if FLAGS.guided:
@@ -162,11 +173,25 @@ class InpaintCAModel(Model):
             xin, mask, reuse=reuse, training=training,
             padding=FLAGS.padding)
         batch_predicted = x2
+        print()
+        print(batch_pos)
+        print(batch_predicted.shape)
+        print(batch_incomplete.shape)
+        print(mask.shape)
+        
+        batch_predicted_shape = batch_predicted.shape
+        batch_incomplete_shape = batch_incomplete.shape
+        
+        batch_incomplete = tf.reshape(batch_incomplete, [batch_incomplete_shape[0],
+                                      batch_incomplete_shape[1],
+                                      batch_incomplete_shape[2],
+                                      batch_predicted_shape[3]])
+        
         losses = {}
         # apply mask and complete image
-        # batch_complete = batch_predicted*mask + batch_incomplete*(1.-mask)
+        batch_complete = batch_predicted*mask + batch_incomplete*(1.-mask)
         # local patches
-        # tf.reshape(batch_pos,[x1.shape[0],x1.shape[1],x1.shape[2],x1.shape[3]])
+        tf.reshape(batch_pos,[x1.shape[0],x1.shape[1],x1.shape[2],x1.shape[3]])
         losses['ae_loss'] = FLAGS.l1_loss_alpha * tf.reduce_mean(tf.abs(batch_pos - x1))
         losses['ae_loss'] += FLAGS.l1_loss_alpha * tf.reduce_mean(tf.abs(batch_pos - x2))
         if summary:
@@ -223,8 +248,6 @@ class InpaintCAModel(Model):
         return g_vars, d_vars, losses
 
     def build_infer_graph(self, FLAGS, batch_data, bbox=None, name='val'):
-        """
-        """
         if FLAGS.guided:
             batch_data, edge = batch_data
             edge = edge[:, :, :, 0:1] / 255.
