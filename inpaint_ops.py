@@ -57,7 +57,8 @@ def gen_conv(x, cnum, ksize, stride=1, rate=1, name='conv',
         p = int(rate*(ksize-1)/2)
         x = tf.pad(x, [[0,0], [p, p], [p, p], [0,0]], mode=padding)
         padding = 'VALID'
-    x = tf.nn.conv2d(x, [[[[ksize, ksize, ksize, ksize, ksize, ksize, ksize]]]], strides=[
+        
+    x = tf.nn.conv2d(x, [[[[ksize, ksize, ksize, ksize, ksize, ksize]]]], strides=[
                      1, stride, stride, 1], name=name, padding=padding)
     print(x.shape)
     if cnum == 3 or activation is None:
@@ -66,10 +67,10 @@ def gen_conv(x, cnum, ksize, stride=1, rate=1, name='conv',
     # tf.reshape(x,[(x.shape[0]*x.shape[3])//2,(x.shape[1]*x.shape[3])//2,(x.shape[2]*x.shape[3])//2,2])
     # # tf.reshape(x, [x.shape[0]/2, x.shape[1]/2, x.shape[2]/2,2])
     # print(x.shape)
-    # x, y = tf.split(x, 2, 3)
-    # x = activation(x)
-    # y = tf.nn.sigmoid(y)
-    # x = x * y
+    x, y = tf.split(x, 2, 3)
+    x = activation(x)
+    y = tf.nn.sigmoid(y)
+    x = x * y
     return x
 
 
