@@ -51,7 +51,7 @@ data_flist:
   ]
 
 static_view_size: 30
-img_shapes: [256, 256, 5]
+img_shapes: [256, 256, 4]
 height: 128
 width: 128
 max_delta_height: 32
