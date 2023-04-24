@@ -1,4 +1,4 @@
-# Fisher-Yates shuffle: This is a simple and efficient algorithm for shuffling a list in place.
+
 import random
 import argparse
 import os
